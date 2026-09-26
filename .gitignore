@@ -1,0 +1,22 @@
+# Secrets and environment variables
+.env
+.env.local
+*.env
+!.env.example
+
+# Compiled binaries
+kavya
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Local data & databases
+data/
+*.db
+*.db-journal
+
+# OS files
+.DS_Store
+Thumbs.db
