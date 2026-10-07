@@ -33,6 +33,8 @@ type ResponseFormatArgs struct {
 	ReplyText       string `json:"reply_text"`
 	ReactionEmoji   string `json:"reaction_emoji"`
 	StickerCategory string `json:"sticker_category"`
+	SendVoiceNote   string `json:"send_voice_note"`
+	SendImagePrompt string `json:"send_image_prompt"`
 }
 
 type GroqClient struct {
@@ -74,10 +76,18 @@ func (g *GroqClient) GenerateResponse(ctx context.Context, systemPrompt string, 
 					},
 					"sticker_category": map[string]interface{}{
 						"type":        "string",
-						"description": "One of [love, laughing, sassy, cool, blushing, neutral, angry, thinking, confused, crying, sad, celebrate, shocked, agreement, greeting, dismiss, playful, secret, sleepy, no_sticker].",
+						"description": "One of [love, laughing, sassy, cool, blushing, neutral, angry, thinking, confused, crying, sad, celebrate, shocked, agreement, greeting, dismiss, playful, secret, sleepy, no_sticker]. CRITICAL: Select 'no_sticker' 80% of the time. If you select a sticker, set reply_text to 'no_output'.",
+					},
+					"send_voice_note": map[string]interface{}{
+						"type":        "string",
+						"description": "If sending a voice note, write the exact text. Use non-verbal vocalizations (laughs, sighs, hesitations, etc) for emotion. Otherwise 'no_voice'. CRITICAL: If you use this, you MUST set reply_text to 'no_output'.",
+					},
+					"send_image_prompt": map[string]interface{}{
+						"type":        "string",
+						"description": "If you want to generate and send an image, write a short visual description here. Otherwise 'no_image'. CRITICAL: If you use this, you MUST set reply_text to 'no_output'.",
 					},
 				},
-				"required": []string{"reply_text", "reaction_emoji", "sticker_category"},
+				"required": []string{"reply_text", "reaction_emoji", "sticker_category", "send_voice_note", "send_image_prompt"},
 			},
 		},
 	}
@@ -141,6 +151,8 @@ func (g *GroqClient) GenerateResponse(ctx context.Context, systemPrompt string, 
 	result := &ResponseFormatArgs{
 		ReactionEmoji:   "no_reaction",
 		StickerCategory: "no_sticker",
+		SendVoiceNote:   "no_voice",
+		SendImagePrompt: "no_image",
 	}
 
 	if len(choice.ToolCalls) > 0 {

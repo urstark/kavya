@@ -6,6 +6,7 @@
 
 # Compiled binaries
 kavya
+kavya_bot
 *.exe
 *.exe~
 *.dll

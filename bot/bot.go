@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	tele "gopkg.in/telebot.v3"
@@ -147,6 +148,31 @@ func (kb *KavyaBot) registerHandlers() {
 		kb.burst.AddMessage(c, userPrompt)
 		return nil
 	})
+
+	kb.teleBot.Handle(tele.OnAnimation, func(c tele.Context) error {
+		kb.burst.AddMessage(c, "[user sent a GIF/animation]")
+		return nil
+	})
+
+	kb.teleBot.Handle(tele.OnVoice, func(c tele.Context) error {
+		kb.burst.AddMessage(c, "[user sent a voice note]")
+		return nil
+	})
+
+	kb.teleBot.Handle(tele.OnVideo, func(c tele.Context) error {
+		kb.burst.AddMessage(c, "[user sent a video]")
+		return nil
+	})
+
+	kb.teleBot.Handle(tele.OnDocument, func(c tele.Context) error {
+		doc := c.Message().Document
+		fileName := "a document"
+		if doc != nil && doc.FileName != "" {
+			fileName = doc.FileName
+		}
+		kb.burst.AddMessage(c, fmt.Sprintf("[user sent a document: %s]", fileName))
+		return nil
+	})
 }
 
 func (kb *KavyaBot) handleAggregatedMessage(c tele.Context, aggregatedText string) {
@@ -166,7 +192,7 @@ func (kb *KavyaBot) handleAggregatedMessage(c tele.Context, aggregatedText strin
 
 	_ = kb.store.SaveMessage(chatID, "user", aggregatedText)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	systemPrompt := ai.BuildSystemPrompt(kb.cfg.BotName, userName)
@@ -191,6 +217,7 @@ func (kb *KavyaBot) handleAggregatedMessage(c tele.Context, aggregatedText strin
 
 	if hasText {
 		_ = kb.store.SaveMessage(chatID, "assistant", replyText)
+		_ = c.Notify(tele.Typing)
 		if err := c.Send(replyText); err != nil {
 			log.Printf("Error sending text reply: %v", err)
 		}
@@ -199,10 +226,66 @@ func (kb *KavyaBot) handleAggregatedMessage(c tele.Context, aggregatedText strin
 	if aiResp.StickerCategory != "" && aiResp.StickerCategory != "no_sticker" {
 		stickerID := stickers.GetStickerForCategory(aiResp.StickerCategory)
 		if stickerID != "" {
+			_ = c.Notify(tele.ChoosingSticker)
+			time.Sleep(1 * time.Second)
 			st := &tele.Sticker{File: tele.File{FileID: stickerID}}
 			if err := c.Send(st); err != nil {
 				log.Printf("Error sending sticker reply: %v", err)
 			}
+		}
+	}
+
+	if aiResp.SendVoiceNote != "" && aiResp.SendVoiceNote != "no_voice" {
+		_ = kb.store.SaveMessage(chatID, "assistant", "[Voice Note]: "+aiResp.SendVoiceNote)
+
+		ttsSuccess := false
+		if kb.cfg.ElevenLabsAPIKey != "" {
+			_ = c.Notify(tele.RecordingAudio)
+			time.Sleep(2 * time.Second)
+			audioBytes, err := ai.GenerateElevenLabsTTS(ctx, kb.cfg.ElevenLabsAPIKey, kb.cfg.ElevenLabsVoiceID, aiResp.SendVoiceNote)
+			if err == nil {
+				voice := &tele.Voice{File: tele.FromReader(bytes.NewReader(audioBytes))}
+				if err := c.Send(voice); err == nil {
+					ttsSuccess = true
+				} else {
+					log.Printf("Error sending voice note: %v", err)
+				}
+			} else {
+				log.Printf("ElevenLabs TTS error: %v", err)
+			}
+		} else if kb.cfg.GeminiAPIKey != "" {
+			_ = c.Notify(tele.RecordingAudio)
+			time.Sleep(2 * time.Second)
+			audioBytes, err := ai.GenerateTTS(ctx, kb.cfg.GeminiAPIKey, aiResp.SendVoiceNote)
+			if err == nil {
+				voice := &tele.Voice{File: tele.FromReader(bytes.NewReader(audioBytes))}
+				if err := c.Send(voice); err == nil {
+					ttsSuccess = true
+				} else {
+					log.Printf("Error sending voice note: %v", err)
+				}
+			} else {
+				log.Printf("Gemini TTS error: %v", err)
+			}
+		} else {
+			log.Printf("No API key configured for TTS")
+		}
+
+		if !ttsSuccess {
+			// Fallback: send as text if audio generation or sending failed
+			_ = c.Send("*(Voice Note Failed)*\n" + aiResp.SendVoiceNote)
+		}
+	}
+
+	if aiResp.SendImagePrompt != "" && aiResp.SendImagePrompt != "no_image" {
+		_ = kb.store.SaveMessage(chatID, "assistant", "[Image Sent]: "+aiResp.SendImagePrompt)
+		_ = c.Notify(tele.UploadingPhoto)
+		time.Sleep(2 * time.Second)
+		encodedPrompt := url.QueryEscape(aiResp.SendImagePrompt)
+		imageURL := fmt.Sprintf("https://image.pollinations.ai/prompt/%s?width=1024&height=1024&nologo=true", encodedPrompt)
+		photo := &tele.Photo{File: tele.FromURL(imageURL)}
+		if err := c.Send(photo); err != nil {
+			log.Printf("Error sending generated image: %v", err)
 		}
 	}
 }
